@@ -1,0 +1,110 @@
+version: '3'
+
+services:
+  db:
+    image: postgis/postgis:15-3.4
+    restart: 'always'
+    ports:
+      - '8214:5432'
+    env_file:
+      - ./.env.postgres
+    volumes:
+      - ./medichat_db:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d
+      - ./medichat_log:/var/log
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: manenfu/medichat-be:latest
+    ports:
+      - '8080:8080'
+    env_file:
+      - ./.env.backend
+    volumes:
+      - ./serviceAccount.json:/serviceAccount.json
+      - ./medichat_log:/var/log
+    network_mode: host
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    image: manenfu/medichat-fe:latest
+    ports:
+      - '3000:3000'
+    network_mode: host
+    env_file:
+      - ./.env.frontend
+
+  nginx:
+    image: nginx:1.24.0
+    ports:
+      - '80:80'
+    network_mode: host
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - backend
+      - frontend
+
+  pgadmin:
+    image: dpage/pgadmin4
+    ports:
+      - '5050:80'
+    volumes:
+      - ./medichat_lib:/var/lib
+    env_file:
+      - ./.env.pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+
+  loki:
+    image: grafana/loki:3.0.0
+    ports:
+      - 3100:3100
+    volumes:
+      - ./loki-config.yml:/etc/loki/loki-config.yaml
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    ports:
+      - 9080:9080
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/promtail-config.yaml
+      - ./medichat_lib:/var/lib
+      - ./medichat_log:/var/log
+
+  grafana:
+    image: grafana/grafana
+    user: 0:0
+    ports:
+      - 3001:3001
+    volumes:
+      - ./grafana.ini:/etc/grafana/grafana.ini
+      - ./medichat_lib:/var/lib
+    environment:
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
+        apiVersion: 1
+        datasources:
+        - name: Loki
+          type: loki
+          access: proxy 
+          orgId: 1
+          url: http://loki:3100
+          basicAuth: false
+          isDefault: true
+          version: 1
+          editable: false
+        EOF
+        /run.sh

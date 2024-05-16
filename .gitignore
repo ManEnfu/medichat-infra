@@ -1,0 +1,10 @@
+.env.backend
+.env.frontend
+.env.postgres
+.env.redis
+.env.nginx
+.env.pgadmin
+serviceAccount.json
+medichat_db
+medichat_lib
+medichat_log
